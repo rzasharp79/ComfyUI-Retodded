@@ -288,3 +288,23 @@ def test_execute_checks_inputs_before_paying(monkeypatch):
     monkeypatch.setattr(openrouter, "API", "http://127.0.0.1:9")  # any chat call would fail differently
     with pytest.raises(RuntimeError, match="does not accept audio"):
         run_node(audio={"waveform": torch.zeros(1, 1, 100), "sample_rate": 100})
+
+
+from io import BytesIO
+
+from PIL import Image
+
+
+def sent_size(image):
+    url = media_parts([image], None, None)[0]["image_url"]["url"]
+    return Image.open(BytesIO(base64.b64decode(url.split(",", 1)[1]))).size
+
+
+def test_pictures_over_2_megapixels_are_reduced_to_2():
+    width, height = sent_size(torch.rand(1, 1536, 2048, 3))  # about 3.1 MP
+    assert width * height <= 2 * 1024 * 1024
+    assert abs(width / height - 2048 / 1536) < 0.01
+
+
+def test_pictures_under_2_megapixels_are_sent_unchanged():
+    assert sent_size(torch.rand(1, 1000, 1000, 3)) == (1000, 1000)

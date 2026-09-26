@@ -17,6 +17,8 @@ from server import PromptServer
 API = "https://openrouter.ai/api/v1"
 LIST_TIMEOUT_SECONDS = 20
 TIMEOUT_SECONDS = 5 * 60
+# Larger pictures are shrunk to this many pixels (ComfyUI counts a megapixel as 1024 x 1024); smaller ones go as they are.
+MAX_PIXELS = 2 * 1024 * 1024
 
 # Trimmed model list, fetched once per server run (or on refresh).
 _models: list[dict] | None = None
@@ -44,7 +46,7 @@ def trim_models(raw: list[dict]) -> list[dict]:
 
 def media_parts(images: list, audio: dict | None, video) -> list[dict]:
     """Message parts for the connected inputs: the first picture of each image, the first audio clip, the video."""
-    parts = [{"type": "image_url", "image_url": {"url": tensor_to_data_uri(image[0:1])}}
+    parts = [{"type": "image_url", "image_url": {"url": tensor_to_data_uri(image[0:1], total_pixels=MAX_PIXELS)}}
              for image in images if image is not None]
     if audio is not None:
         mp3 = audio_input_to_mp3({"waveform": audio["waveform"][0:1], "sample_rate": audio["sample_rate"]})
