@@ -127,3 +127,126 @@ def test_read_answer_rejects_empty(data):
 def test_cost_text():
     assert cost_text(0.000412) == "Cost: $0.000412"
     assert cost_text(None) == "Done"
+
+
+import asyncio
+
+import aiohttp
+from aiohttp import web
+
+from retodded import openrouter
+
+
+def serve(app):
+    """Starts app on a free local port; returns (base_url, runner)."""
+    async def start():
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        return f"http://127.0.0.1:{site._server.sockets[0].getsockname()[1]}", runner
+    return start()
+
+
+def fake_openrouter(chat_status=200, chat_body=None):
+    seen = {"list_calls": 0}
+
+    async def models(request):
+        seen["list_calls"] += 1
+        return web.json_response({"data": [RAW]})
+
+    async def completions(request):
+        seen["body"] = await request.json()
+        seen["auth"] = request.headers["Authorization"]
+        return web.json_response(chat_body or {"choices": [{"message": {"content": "hi"}}]}, status=chat_status)
+
+    app = web.Application()
+    app.router.add_get("/models", models)
+    app.router.add_post("/chat/completions", completions)
+    return app, seen
+
+
+def test_load_models_caches_until_refresh(monkeypatch):
+    app, seen = fake_openrouter()
+
+    async def go():
+        url, runner = await serve(app)
+        monkeypatch.setattr(openrouter, "API", url)
+        monkeypatch.setattr(openrouter, "_models", None)
+        try:
+            first = await openrouter.load_models()
+            await openrouter.load_models()
+            await openrouter.load_models(refresh=True)
+            return first
+        finally:
+            await runner.cleanup()
+
+    assert [m["id"] for m in asyncio.run(go())] == ["a/vision"]
+    assert seen["list_calls"] == 2
+
+
+def test_chat_sends_key_and_body(monkeypatch):
+    app, seen = fake_openrouter()
+
+    async def go():
+        url, runner = await serve(app)
+        monkeypatch.setattr(openrouter, "API", url)
+        try:
+            async with aiohttp.ClientSession() as session:
+                return await openrouter.chat(session, "k", {"model": "a/vision"})
+        finally:
+            await runner.cleanup()
+
+    assert asyncio.run(go()) == {"choices": [{"message": {"content": "hi"}}]}
+    assert seen["auth"] == "Bearer k"
+    assert seen["body"] == {"model": "a/vision"}
+
+
+@pytest.mark.parametrize("status,body,message", [
+    (402, {"error": {"code": 402, "message": "Insufficient credits"}}, "OpenRouter error 402: Insufficient credits"),
+    (200, {"error": {"code": 502, "message": "Provider down"}}, "OpenRouter error 502: Provider down"),
+    (500, {"oops": 1}, "OpenRouter error 500"),
+])
+def test_chat_raises_openrouter_errors(monkeypatch, status, body, message):
+    app, _ = fake_openrouter(status, body)
+
+    async def go():
+        url, runner = await serve(app)
+        monkeypatch.setattr(openrouter, "API", url)
+        try:
+            async with aiohttp.ClientSession() as session:
+                await openrouter.chat(session, "k", {})
+        finally:
+            await runner.cleanup()
+
+    with pytest.raises(RuntimeError, match=message):
+        asyncio.run(go())
+
+
+def test_models_route_serves_list_and_reports_failure(monkeypatch):
+    routes = web.RouteTableDef()
+    openrouter.add_routes(routes)
+    ours = web.Application()
+    ours.add_routes(routes)
+
+    async def go():
+        upstream, seen = fake_openrouter()
+        up_url, up_runner = await serve(upstream)
+        our_url, our_runner = await serve(ours)
+        monkeypatch.setattr(openrouter, "_models", None)
+        try:
+            async with aiohttp.ClientSession() as session:
+                monkeypatch.setattr(openrouter, "API", up_url)
+                async with session.get(f"{our_url}/retodded/openrouter/models") as r:
+                    ok = (r.status, await r.json())
+                monkeypatch.setattr(openrouter, "API", "http://127.0.0.1:9")
+                async with session.get(f"{our_url}/retodded/openrouter/models?refresh=1") as r:
+                    bad = (r.status, await r.json())
+            return ok, bad
+        finally:
+            await our_runner.cleanup()
+            await up_runner.cleanup()
+
+    (ok_status, ok_body), (bad_status, bad_body) = asyncio.run(go())
+    assert ok_status == 200 and ok_body[0]["id"] == "a/vision"
+    assert bad_status == 502 and bad_body["error"]

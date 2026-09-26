@@ -5,10 +5,17 @@ Spec: docs/superpowers/specs/2026-09-26-openrouter-node-design.md (in the ComfyU
 
 import base64
 
+import aiohttp
+from aiohttp import web
+
 from comfy_api.latest import Types
 from comfy_api_nodes.util.conversions import audio_input_to_mp3, tensor_to_data_uri, video_to_base64_string
 
 API = "https://openrouter.ai/api/v1"
+LIST_TIMEOUT_SECONDS = 20
+
+# Trimmed model list, fetched once per server run (or on refresh).
+_models: list[dict] | None = None
 
 
 def per_million(price) -> float | None:
@@ -77,3 +84,39 @@ def read_answer(data: dict) -> tuple[str, float | None]:
 
 def cost_text(cost: float | None) -> str:
     return "Done" if cost is None else f"Cost: ${cost:g}"
+
+
+async def load_models(refresh: bool = False) -> list[dict]:
+    global _models
+    if _models is None or refresh:
+        timeout = aiohttp.ClientTimeout(total=LIST_TIMEOUT_SECONDS)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(f"{API}/models") as response:
+                response.raise_for_status()
+                _models = trim_models((await response.json())["data"])
+    return _models
+
+
+async def chat(session: aiohttp.ClientSession, key: str, body: dict) -> dict:
+    """One chat call. OpenRouter can also report a failure inside a 200 answer."""
+    async with session.post(f"{API}/chat/completions", json=body,
+                            headers={"Authorization": f"Bearer {key}"}) as response:
+        data = await response.json(content_type=None)
+    if not response.ok or "error" in data:
+        error = data.get("error") or {}
+        raise RuntimeError(f"OpenRouter error {error.get('code', response.status)}: {error.get('message', data)}")
+    return data
+
+
+async def models_route(request: web.Request) -> web.Response:
+    try:
+        return web.json_response(await load_models(refresh="refresh" in request.query))
+    except (aiohttp.ClientError, TimeoutError) as error:
+        return web.json_response({"error": str(error) or type(error).__name__}, status=502)
+
+
+def add_routes(routes: web.RouteTableDef) -> None:
+    routes.get("/retodded/openrouter/models")(models_route)
+
+
+NODES = []
