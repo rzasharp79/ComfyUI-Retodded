@@ -45,6 +45,7 @@ Built to fix the smooth, waxy skin that FLUX renders often have.
 | Node | What it does |
 |------|--------------|
 | **WaveSpeed GPT Image 2.5 Edit** | Edits up to 16 pictures with OpenAI GPT Image 2.5 Sunburst through [WaveSpeed](https://wavespeed.ai). Refer to pictures by order in the prompt, e.g. "the jacket from image 2". Choose aspect ratio, resolution and quality; the node shows the cost of each run. Needs your own WaveSpeed key in the `WAVESPEED_API_TOKEN` environment variable, and runs are billed to that account. |
+| **OpenRouter** | Sends up to three pictures, one audio clip and one video plus a system prompt and prompt to any [OpenRouter](https://openrouter.ai) model and outputs its text answer, for example to caption pictures, transcribe audio or summarize videos. Pick the model on the node: tabs for TEXT2TEXT, IMAGE2TEXT, AUDIO2TEXT and VIDEO2TEXT, search, sort by name, cost, release date or context, and ★ favorites that stay on top. Only the first picture of each image batch is sent, shrunk to 2 megapixels if it is bigger. The node shows the cost of each run. Needs your own OpenRouter key in the `OPENROUTER_API` environment variable, and runs are billed to that account. |
 
 ## Note on node ids
 
