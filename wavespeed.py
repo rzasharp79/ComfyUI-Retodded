@@ -104,7 +104,7 @@ class WaveSpeedGPTImageEdit(io.ComfyNode):
         return io.Schema(
             node_id="MyCustom_WaveSpeedGPTImageEdit",
             display_name="WaveSpeed GPT Image 2.5 Edit",
-            category="ReTodded",
+            category="ReTodded/API",
             description="Edits up to 16 pictures with OpenAI GPT Image 2.5 Sunburst on WaveSpeed, "
                         "billed to the WAVESPEED_API_TOKEN account.",
             inputs=[

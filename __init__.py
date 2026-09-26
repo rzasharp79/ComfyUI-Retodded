@@ -1,34 +1,28 @@
 """ComfyUI-Retodded: one ComfyUI node pack holding assorted home-grown nodes.
 
 ComfyUI loads this folder as a single pack. Every node module must be listed
-in NODE_MODULES below or its nodes will not exist.
+in NODE_MODULES below (or merged in like reactor) or its nodes will not exist.
+
+ComfyUI reads NODE_CLASS_MAPPINGS before comfy_entrypoint and ignores the
+entrypoint when both exist, so the V3 nodes are exported here by node_id,
+next to the V1 nodes of the ReActor copy in reactor/.
 """
 
-from typing_extensions import override
-
-from comfy_api.latest import ComfyExtension, io
 from server import PromptServer
 
-from . import age_recipe, canvas_info, node_hotkeys, openrouter, restart, rotater, skin_texture, wavespeed
+from . import canvas_info, node_hotkeys, openrouter, pixaroma_clone, reactor, restart, rotater, wavespeed
 
-NODE_MODULES = [age_recipe, canvas_info, node_hotkeys, openrouter, rotater, skin_texture, wavespeed]
+NODE_MODULES = [canvas_info, node_hotkeys, openrouter, pixaroma_clone, rotater, wavespeed]
 
 WEB_DIRECTORY = "./web"
 
+_SCHEMAS = {node: node.GET_SCHEMA() for module in NODE_MODULES for node in module.NODES}
 
-class RetoddedExtension(ComfyExtension):
-    @override
-    async def on_load(self) -> None:
-        # The standalone loader check runs without a server, so there is nothing to add routes to.
-        server = getattr(PromptServer, "instance", None)
-        if server is not None:
-            openrouter.add_routes(server.routes)
-            restart.add_routes(server.routes)
+NODE_CLASS_MAPPINGS = {schema.node_id: node for node, schema in _SCHEMAS.items()} | reactor.NODE_CLASS_MAPPINGS
+NODE_DISPLAY_NAME_MAPPINGS = {schema.node_id: schema.display_name for schema in _SCHEMAS.values() if schema.display_name is not None} | reactor.NODE_DISPLAY_NAME_MAPPINGS
 
-    @override
-    async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [node for module in NODE_MODULES for node in module.NODES]
-
-
-async def comfy_entrypoint() -> RetoddedExtension:
-    return RetoddedExtension()
+# The standalone loader check runs without a server, so there is nothing to add routes to.
+_server = getattr(PromptServer, "instance", None)
+if _server is not None:
+    openrouter.add_routes(_server.routes)
+    restart.add_routes(_server.routes)

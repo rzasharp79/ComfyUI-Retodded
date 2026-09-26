@@ -11,7 +11,7 @@ class CanvasInfo(io.ComfyNode):
         return io.Schema(
             node_id="MyCustom_CanvasInfo",
             display_name="Canvas Info",
-            category="ReTodded",
+            category="ReTodded/Canvas",
             description="Shows this node's x/y position and width/height on the canvas. Updates live when moved or resized. Has no inputs or outputs and never executes.",
         )
 

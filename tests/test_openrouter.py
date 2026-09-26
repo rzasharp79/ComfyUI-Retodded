@@ -266,7 +266,7 @@ def run_node(**kwargs):
 def test_schema():
     schema = OpenRouter.define_schema()
     assert schema.node_id == "MyCustom_OpenRouter"
-    assert schema.category == "ReTodded"
+    assert schema.category == "ReTodded/API"
     assert [i.id for i in schema.inputs] == ["image1", "image2", "image3", "audio", "video",
                                              "system_prompt", "prompt", "model"]
     assert [i.optional for i in schema.inputs[:5]] == [True] * 5

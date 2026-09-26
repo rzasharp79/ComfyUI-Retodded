@@ -21,7 +21,7 @@ class Rotater(io.ComfyNode):
         return io.Schema(
             node_id="MyCustom_Rotater",
             display_name="Rotater",
-            category="ReTodded",
+            category="ReTodded/Workflow",
             description="Type a list of values separated by the delimiter, for example man;woman;dog. Pressing Run queues one run per item: the first run outputs man, the next woman, the last dog. The type dropdown sets what the output socket carries: string, int, float, or combo (plugs into a dropdown input; items must match the dropdown's option names exactly).",
             inputs=[
                 io.Combo.Input("type", options=TYPES, socketless=True, tooltip="What the output socket carries."),

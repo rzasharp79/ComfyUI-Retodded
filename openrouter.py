@@ -173,7 +173,7 @@ class OpenRouter(io.ComfyNode):
         return io.Schema(
             node_id="MyCustom_OpenRouter",
             display_name="OpenRouter",
-            category="ReTodded",
+            category="ReTodded/API",
             description="Sends pictures, audio or video plus a prompt to an OpenRouter model and outputs its text "
                         "answer. Only the first picture of each image batch is sent. Needs your own key in the "
                         "OPENROUTER_API environment variable; runs are billed to that account.",

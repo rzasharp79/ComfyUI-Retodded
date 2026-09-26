@@ -11,7 +11,7 @@ class NodeHotkeys(io.ComfyNode):
         return io.Schema(
             node_id="MyCustom_NodeHotkeys",
             display_name="Node Hotkeys",
-            category="ReTodded",
+            category="ReTodded/Canvas",
             description="Lists every node in this graph sorted by x then y. Give a node a digit hotkey (0-9) and a zoom (0.5-2.0); pressing the digit pans the canvas to that node. Click Refresh after adding or removing nodes. Has no inputs or outputs and never executes.",
         )
 
