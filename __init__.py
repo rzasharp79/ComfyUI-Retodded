@@ -9,7 +9,7 @@ from typing_extensions import override
 from comfy_api.latest import ComfyExtension, io
 from server import PromptServer
 
-from . import age_recipe, canvas_info, node_hotkeys, openrouter, rotater, skin_texture, wavespeed
+from . import age_recipe, canvas_info, node_hotkeys, openrouter, restart, rotater, skin_texture, wavespeed
 
 NODE_MODULES = [age_recipe, canvas_info, node_hotkeys, openrouter, rotater, skin_texture, wavespeed]
 
@@ -23,6 +23,7 @@ class RetoddedExtension(ComfyExtension):
         server = getattr(PromptServer, "instance", None)
         if server is not None:
             openrouter.add_routes(server.routes)
+            restart.add_routes(server.routes)
 
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:

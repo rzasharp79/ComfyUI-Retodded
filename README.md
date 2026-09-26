@@ -47,6 +47,23 @@ Built to fix the smooth, waxy skin that FLUX renders often have.
 | **WaveSpeed GPT Image 2.5 Edit** | Edits up to 16 pictures with OpenAI GPT Image 2.5 Sunburst through [WaveSpeed](https://wavespeed.ai). Refer to pictures by order in the prompt, e.g. "the jacket from image 2". Choose aspect ratio, resolution and quality; the node shows the cost of each run. Needs your own WaveSpeed key in the `WAVESPEED_API_TOKEN` environment variable, and runs are billed to that account. |
 | **OpenRouter** | Sends up to three pictures, one audio clip and one video plus a system prompt and prompt to any [OpenRouter](https://openrouter.ai) model and outputs its text answer, for example to caption pictures, transcribe audio or summarize videos. Pick the model on the node: tabs for TEXT2TEXT, IMAGE2TEXT, AUDIO2TEXT and VIDEO2TEXT, search, sort by name, cost, release date or context, and ★ favorites that stay on top. Only the first picture of each image batch is sent, shrunk to 2 megapixels if it is bigger. The node shows the cost of each run. Needs your own OpenRouter key in the `OPENROUTER_API` environment variable, and runs are billed to that account. |
 
+## Restart button
+
+The left sidebar gets a **Restart** button (circular arrow) just above Help. It asks first, and warns when jobs are running or queued, because a restart stops the running job and clears the queue. The open page reconnects on its own once the server is back; no new browser tab opens.
+
+By default the server restarts itself in place, the way ComfyUI-Manager's restart does. On Windows that makes a `.bat` launcher think ComfyUI has stopped while the new server keeps running in its window. To avoid that, have the launcher set `RETODDED_RESTART_IN_LAUNCHER=1` and start ComfyUI again when it exits with code 42:
+
+```bat
+set RETODDED_RESTART_IN_LAUNCHER=1
+set "RESTART_ARGS="
+:run
+python main.py %* %RESTART_ARGS%
+if %errorlevel%==42 (
+    set "RESTART_ARGS=--disable-auto-launch"
+    goto run
+)
+```
+
 ## Note on node ids
 
 Node ids start with `MyCustom_` (for example `MyCustom_Rotater`). That prefix comes from an earlier name of this pack and stays so that saved workflows keep working.
