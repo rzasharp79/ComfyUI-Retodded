@@ -3,13 +3,17 @@ own OPENROUTER_API key and returns the model's text answer. web/openrouter.js dr
 this module also serves the model list it shows.
 Spec: docs/superpowers/specs/2026-09-26-openrouter-node-design.md (in the ComfyUI folder)."""
 
+import asyncio
 import base64
+import json
 import logging
 import os
 
 import aiohttp
+import torchaudio
 from aiohttp import web
 
+import comfy.model_management
 from comfy_api.latest import Types, io
 from comfy_api_nodes.util.conversions import audio_input_to_mp3, tensor_to_data_uri, video_to_base64_string
 from server import PromptServer
@@ -19,6 +23,8 @@ LIST_TIMEOUT_SECONDS = 20
 TIMEOUT_SECONDS = 5 * 60
 # Larger pictures are shrunk to this many pixels (ComfyUI counts a megapixel as 1024 x 1024); smaller ones go as they are.
 MAX_PIXELS = 2 * 1024 * 1024
+# The MP3 encoder takes at most 48 kHz and two channels.
+MP3_MAX_RATE = 48000
 
 # Trimmed model list, fetched once per server run (or on refresh).
 _models: list[dict] | None = None
@@ -33,15 +39,22 @@ def per_million(price) -> float | None:
 
 def trim_models(raw: list[dict]) -> list[dict]:
     """Keeps models that answer in text, with only the fields the picker shows."""
-    return [{
-        "id": m["id"],
-        "name": m["name"],
-        "input_modalities": m["architecture"]["input_modalities"],
-        "prompt_price": per_million(m.get("pricing", {}).get("prompt")),
-        "completion_price": per_million(m.get("pricing", {}).get("completion")),
-        "created": m.get("created"),
-        "context_length": m.get("context_length"),
-    } for m in raw if "text" in m["architecture"]["output_modalities"]]
+    models = []
+    for m in raw:
+        arch = m.get("architecture") or {}
+        pricing = m.get("pricing") or {}
+        if "text" not in (arch.get("output_modalities") or []):
+            continue
+        models.append({
+            "id": m["id"],
+            "name": m["name"],
+            "input_modalities": arch.get("input_modalities") or [],
+            "prompt_price": per_million(pricing.get("prompt")),
+            "completion_price": per_million(pricing.get("completion")),
+            "created": m.get("created"),
+            "context_length": m.get("context_length"),
+        })
+    return models
 
 
 def media_parts(images: list, audio: dict | None, video) -> list[dict]:
@@ -49,13 +62,23 @@ def media_parts(images: list, audio: dict | None, video) -> list[dict]:
     parts = [{"type": "image_url", "image_url": {"url": tensor_to_data_uri(image[0:1], total_pixels=MAX_PIXELS)}}
              for image in images if image is not None]
     if audio is not None:
-        mp3 = audio_input_to_mp3({"waveform": audio["waveform"][0:1], "sample_rate": audio["sample_rate"]})
+        mp3 = audio_input_to_mp3(mp3_ready(audio))
         parts.append({"type": "input_audio",
                       "input_audio": {"data": base64.b64encode(mp3.getvalue()).decode(), "format": "mp3"}})
     if video is not None:
         data = video_to_base64_string(video, Types.VideoContainer.MP4, Types.VideoCodec.H264)
         parts.append({"type": "video_url", "video_url": {"url": f"data:video/mp4;base64,{data}"}})
     return parts
+
+
+def mp3_ready(audio: dict) -> dict:
+    """First clip of the batch, mixed to mono above two channels and resampled above 48 kHz."""
+    waveform, rate = audio["waveform"][0:1], int(audio["sample_rate"])
+    if waveform.shape[1] > 2:
+        waveform = waveform.mean(dim=1, keepdim=True)
+    if rate > MP3_MAX_RATE:
+        waveform, rate = torchaudio.functional.resample(waveform, rate, MP3_MAX_RATE), MP3_MAX_RATE
+    return {"waveform": waveform, "sample_rate": rate}
 
 
 def used_kinds(images: list, audio, video) -> list[str]:
@@ -108,11 +131,27 @@ async def chat(session: aiohttp.ClientSession, key: str, body: dict) -> dict:
     """One chat call. OpenRouter can also report a failure inside a 200 answer."""
     async with session.post(f"{API}/chat/completions", json=body,
                             headers={"Authorization": f"Bearer {key}"}) as response:
-        data = await response.json(content_type=None)
-    if not response.ok or "error" in data:
-        error = data.get("error") or {}
-        raise RuntimeError(f"OpenRouter error {error.get('code', response.status)}: {error.get('message', data)}")
-    return data
+        text = await response.text()
+    # Gateways in front of OpenRouter answer with HTML error pages, so the body may not be JSON.
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if response.ok and isinstance(data, dict) and "error" not in data:
+        return data
+    error = data.get("error") if isinstance(data, dict) else None
+    if isinstance(error, dict):
+        raise RuntimeError(f"OpenRouter error {error.get('code', response.status)}: {error.get('message', error)}")
+    raise RuntimeError(f"OpenRouter error {response.status}: {error or text[:200] or 'no details'}")
+
+
+async def until_done_or_cancelled(task: asyncio.Task):
+    """Waits for task, but gives up as soon as the user presses Cancel in ComfyUI."""
+    while not (await asyncio.wait({task}, timeout=0.5))[0]:
+        if comfy.model_management.processing_interrupted():
+            task.cancel()
+            comfy.model_management.throw_exception_if_processing_interrupted()
+    return task.result()
 
 
 async def models_route(request: web.Request) -> web.Response:
@@ -176,7 +215,7 @@ class OpenRouter(io.ComfyNode):
 
         show(f"OpenRouter: waiting for {model}…")
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)) as session:
-            text, cost = read_answer(await chat(session, key, body))
+            text, cost = read_answer(await until_done_or_cancelled(asyncio.ensure_future(chat(session, key, body))))
         show(cost_text(cost))
         return io.NodeOutput(text)
 

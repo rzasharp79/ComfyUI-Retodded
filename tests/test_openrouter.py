@@ -311,3 +311,131 @@ def test_pictures_over_2_megapixels_are_reduced_to_2():
 
 def test_pictures_under_2_megapixels_are_sent_unchanged():
     assert sent_size(torch.rand(1, 1000, 1000, 3)) == (1000, 1000)
+
+
+import time
+from types import SimpleNamespace
+
+import comfy.model_management
+
+
+class FakeServer:
+    def __init__(self):
+        self.texts = []
+
+    def send_progress_text(self, text, node_id):
+        self.texts.append(text)
+
+
+@pytest.fixture
+def node_env(monkeypatch):
+    """Lets execute() reach the chat call: a key, a status channel and a node id."""
+    monkeypatch.setenv("OPENROUTER_API", "k")
+    server = FakeServer()
+    monkeypatch.setattr(openrouter, "PromptServer", SimpleNamespace(instance=server))
+    monkeypatch.setattr(OpenRouter, "hidden", SimpleNamespace(unique_id="7"), raising=False)
+    monkeypatch.setattr(openrouter, "_models", MODELS)
+    return server
+
+
+def run_against_app(app, monkeypatch, **kwargs):
+    async def go():
+        url, runner = await serve(app)
+        monkeypatch.setattr(openrouter, "API", url)
+        try:
+            return await OpenRouter.execute(**({"system_prompt": "", "prompt": "Describe.", "model": "a/vision"} | kwargs))
+        finally:
+            await runner.cleanup()
+    return asyncio.run(go())
+
+
+def test_execute_returns_answer_and_shows_cost(monkeypatch, node_env):
+    app, seen = fake_openrouter(chat_body={"choices": [{"message": {"content": "A cat."}}], "usage": {"cost": 0.00002}})
+    out = run_against_app(app, monkeypatch, image1=torch.zeros(1, 8, 8, 3))
+    assert out.result == ("A cat.",)
+    assert node_env.texts == ["OpenRouter: waiting for a/vision…", "Cost: $0.00002"]
+    assert [p["type"] for p in seen["body"]["messages"][-1]["content"]] == ["text", "image_url"]
+
+
+def test_execute_still_sends_when_model_list_cannot_load(monkeypatch, node_env):
+    app, seen = fake_openrouter()
+    monkeypatch.setattr(openrouter, "_models", None)
+
+    async def broken(refresh=False):
+        raise aiohttp.ClientConnectionError("offline")
+
+    monkeypatch.setattr(openrouter, "load_models", broken)
+    assert run_against_app(app, monkeypatch).result == ("hi",)
+    assert seen["body"]["model"] == "a/vision"
+
+
+def test_cancel_stops_a_running_request(monkeypatch, node_env):
+    async def slow(request):
+        await asyncio.sleep(5)
+        return web.json_response({"choices": [{"message": {"content": "late"}}]})
+
+    app = web.Application()
+    app.router.add_post("/chat/completions", slow)
+
+    async def press_cancel():
+        await asyncio.sleep(0.5)
+        comfy.model_management.interrupt_current_processing(True)
+
+    async def go():
+        url, runner = await serve(app)
+        monkeypatch.setattr(openrouter, "API", url)
+        cancel = asyncio.ensure_future(press_cancel())
+        start = time.monotonic()
+        try:
+            await OpenRouter.execute(system_prompt="", prompt="x", model="a/vision")
+        except comfy.model_management.InterruptProcessingException:
+            return time.monotonic() - start  # timed before the fake server's shutdown, which waits for its handler
+        finally:
+            await cancel
+            await runner.cleanup()
+
+    try:
+        waited = asyncio.run(go())
+    finally:
+        comfy.model_management.interrupt_current_processing(False)
+    assert waited is not None and waited < 3
+
+
+@pytest.mark.parametrize("status,text,message", [
+    (502, "<html>Bad gateway</html>", "OpenRouter error 502: <html>Bad gateway</html>"),
+    (200, "", "OpenRouter error 200: no details"),
+    (400, '{"error": "boom"}', "OpenRouter error 400: boom"),
+])
+def test_chat_explains_answers_that_are_not_json(monkeypatch, status, text, message):
+    async def answer(request):
+        return web.Response(status=status, text=text)
+
+    app = web.Application()
+    app.router.add_post("/chat/completions", answer)
+
+    async def go():
+        url, runner = await serve(app)
+        monkeypatch.setattr(openrouter, "API", url)
+        try:
+            async with aiohttp.ClientSession() as session:
+                await openrouter.chat(session, "k", {})
+        finally:
+            await runner.cleanup()
+
+    with pytest.raises(RuntimeError, match=f"^{message}$"):
+        asyncio.run(go())
+
+
+def test_trim_models_survives_null_pricing_and_missing_architecture():
+    no_price = {**RAW, "pricing": None}
+    no_arch = {"id": "x/odd", "name": "Odd"}
+    models = trim_models([no_price, no_arch])
+    assert [m["id"] for m in models] == ["a/vision"]
+    assert models[0]["prompt_price"] is None
+
+
+@pytest.mark.parametrize("rate,channels", [(96000, 2), (44100, 6)])
+def test_audio_the_mp3_encoder_cannot_take_is_converted(rate, channels):
+    audio = {"waveform": torch.rand(1, channels, rate // 2) * 0.2, "sample_rate": rate}
+    part = media_parts([], audio, None)[0]
+    assert len(base64.b64decode(part["input_audio"]["data"])) > 0
