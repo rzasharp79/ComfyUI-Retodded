@@ -71,6 +71,9 @@ test("formatting", () => {
   assert.equal(formatPrice(0), "free");
   assert.equal(formatPrice(0.075), "0.075");
   assert.equal(formatPrice(0.15), "0.15");
+  assert.equal(formatPrice(0.3), "0.30");
+  assert.equal(formatPrice(2.5), "2.50");
+  assert.equal(formatPrice(0.00002), "0.00002");
   assert.equal(formatPrice(15), "15.00");
   assert.equal(formatContext(1050000), "1.05M");
   assert.equal(formatContext(1000000), "1M");

@@ -53,7 +53,9 @@ export function toggleFavorite(favorites, id) {
 export function formatPrice(p) {
   if (p == null) return "varies";
   if (p === 0) return "free";
-  return p >= 1 ? p.toFixed(2) : String(Number(p.toPrecision(2)));
+  // At least two decimals so the column lines up; up to four when the price needs them.
+  if (p < 0.01) return String(Number(p.toPrecision(2)));
+  return p.toFixed(4).replace(/0{1,2}$/, "");
 }
 
 export function formatContext(n) {
