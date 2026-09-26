@@ -24,10 +24,15 @@ const pickers = new Set();
 async function loadModels(refresh) {
   list = { ...list, loading: true, error: null };
   renderAll();
-  const response = await api.fetchApi(`/retodded/openrouter/models${refresh ? "?refresh=1" : ""}`);
-  const body = await response.json();
-  list = response.ok ? { models: body, error: null, loading: false }
-    : { models: list.models, error: body.error ?? `HTTP ${response.status}`, loading: false };
+  // Any failure (server down, non-JSON answer) must end in an error line, never an endless "Loading".
+  try {
+    const response = await api.fetchApi(`/retodded/openrouter/models${refresh ? "?refresh=1" : ""}`);
+    const body = await response.json();
+    list = response.ok ? { models: body, error: null, loading: false }
+      : { models: list.models, error: body.error ?? `HTTP ${response.status}`, loading: false };
+  } catch (error) {
+    list = { models: list.models, error: error.message || String(error), loading: false };
+  }
   renderAll();
 }
 
