@@ -4,15 +4,19 @@ this module also serves the model list it shows.
 Spec: docs/superpowers/specs/2026-09-26-openrouter-node-design.md (in the ComfyUI folder)."""
 
 import base64
+import logging
+import os
 
 import aiohttp
 from aiohttp import web
 
-from comfy_api.latest import Types
+from comfy_api.latest import Types, io
 from comfy_api_nodes.util.conversions import audio_input_to_mp3, tensor_to_data_uri, video_to_base64_string
+from server import PromptServer
 
 API = "https://openrouter.ai/api/v1"
 LIST_TIMEOUT_SECONDS = 20
+TIMEOUT_SECONDS = 5 * 60
 
 # Trimmed model list, fetched once per server run (or on refresh).
 _models: list[dict] | None = None
@@ -119,4 +123,59 @@ def add_routes(routes: web.RouteTableDef) -> None:
     routes.get("/retodded/openrouter/models")(models_route)
 
 
-NODES = []
+class OpenRouter(io.ComfyNode):
+    """Picks a model with the picker in web/openrouter.js, which writes its id into the hidden `model` widget."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="MyCustom_OpenRouter",
+            display_name="OpenRouter",
+            category="ReTodded",
+            description="Sends pictures, audio or video plus a prompt to an OpenRouter model and outputs its text "
+                        "answer. Only the first picture of each image batch is sent. Needs your own key in the "
+                        "OPENROUTER_API environment variable; runs are billed to that account.",
+            inputs=[
+                io.Image.Input("image1", optional=True),
+                io.Image.Input("image2", optional=True),
+                io.Image.Input("image3", optional=True),
+                io.Audio.Input("audio", optional=True),
+                io.Video.Input("video", optional=True),
+                io.String.Input("system_prompt", display_name="system prompt", multiline=True, default=""),
+                io.String.Input("prompt", multiline=True, default=""),
+                io.String.Input("model", default="", socketless=True, extra_dict={"hidden": True},
+                                tooltip="OpenRouter model id, set by the model list on the node."),
+            ],
+            outputs=[io.String.Output()],
+            hidden=[io.Hidden.unique_id],
+        )
+
+    @classmethod
+    async def execute(cls, system_prompt: str, prompt: str, model: str, image1=None, image2=None, image3=None,
+                      audio=None, video=None) -> io.NodeOutput:
+        key = os.environ.get("OPENROUTER_API")
+        if not key:
+            raise RuntimeError("Set the OPENROUTER_API environment variable to your OpenRouter key, then restart ComfyUI.")
+        if not model:
+            raise RuntimeError("Pick a model in the node's list first.")
+        images = [image1, image2, image3]
+        # The input check is a courtesy that saves a paid call; without the list OpenRouter still decides.
+        try:
+            models = await load_models()
+        except (aiohttp.ClientError, TimeoutError) as error:
+            logging.warning("OpenRouter: model list unavailable, skipping the input check: %s", error)
+        else:
+            check_model(model, used_kinds(images, audio, video), models)
+        body = build_request(model, system_prompt, prompt, media_parts(images, audio, video))
+
+        def show(text: str) -> None:
+            PromptServer.instance.send_progress_text(text, cls.hidden.unique_id)
+
+        show(f"OpenRouter: waiting for {model}…")
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=TIMEOUT_SECONDS)) as session:
+            text, cost = read_answer(await chat(session, key, body))
+        show(cost_text(cost))
+        return io.NodeOutput(text)
+
+
+NODES = [OpenRouter]

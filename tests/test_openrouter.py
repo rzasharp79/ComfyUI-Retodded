@@ -250,3 +250,41 @@ def test_models_route_serves_list_and_reports_failure(monkeypatch):
     (ok_status, ok_body), (bad_status, bad_body) = asyncio.run(go())
     assert ok_status == 200 and ok_body[0]["id"] == "a/vision"
     assert bad_status == 502 and bad_body["error"]
+
+
+from retodded.openrouter import OpenRouter
+
+
+def run_node(**kwargs):
+    args = {"system_prompt": "", "prompt": "Describe.", "model": "a/vision"} | kwargs
+    return asyncio.run(OpenRouter.execute(**args))
+
+
+def test_schema():
+    schema = OpenRouter.define_schema()
+    assert schema.node_id == "MyCustom_OpenRouter"
+    assert schema.category == "ReTodded"
+    assert [i.id for i in schema.inputs] == ["image1", "image2", "image3", "audio", "video",
+                                             "system_prompt", "prompt", "model"]
+    assert [i.optional for i in schema.inputs[:5]] == [True] * 5
+    assert OpenRouter in openrouter.NODES
+
+
+def test_execute_without_key_fails_first(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API", raising=False)
+    with pytest.raises(RuntimeError, match="OPENROUTER_API"):
+        run_node()
+
+
+def test_execute_without_model_fails_before_any_request(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API", "k")
+    with pytest.raises(RuntimeError, match="Pick a model"):
+        run_node(model="")
+
+
+def test_execute_checks_inputs_before_paying(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API", "k")
+    monkeypatch.setattr(openrouter, "_models", MODELS)
+    monkeypatch.setattr(openrouter, "API", "http://127.0.0.1:9")  # any chat call would fail differently
+    with pytest.raises(RuntimeError, match="does not accept audio"):
+        run_node(audio={"waveform": torch.zeros(1, 1, 100), "sample_rate": 100})
