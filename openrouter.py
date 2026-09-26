@@ -89,7 +89,8 @@ def read_answer(data: dict) -> tuple[str, float | None]:
 
 
 def cost_text(cost: float | None) -> str:
-    return "Done" if cost is None else f"Cost: ${cost:g}"
+    # Plain decimals: OpenRouter costs are often under $0.0001, which :g would print as 3.5e-05.
+    return "Done" if cost is None else f"Cost: ${cost:.6f}".rstrip("0").rstrip(".")
 
 
 async def load_models(refresh: bool = False) -> list[dict]:

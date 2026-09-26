@@ -126,6 +126,9 @@ def test_read_answer_rejects_empty(data):
 
 def test_cost_text():
     assert cost_text(0.000412) == "Cost: $0.000412"
+    assert cost_text(3.5046e-05) == "Cost: $0.000035"
+    assert cost_text(0.0123456) == "Cost: $0.012346"
+    assert cost_text(0) == "Cost: $0"
     assert cost_text(None) == "Done"
 
 
